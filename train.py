@@ -30,7 +30,6 @@ class Model_features:
     dataset_sizes: int
     classes: list
     model: str
-    device: str
     lr: float
     optimizer: str
     scheduler: str
@@ -46,13 +45,6 @@ def parse_args():
         help="select model",
         type=str,
         default="resnet18",
-    )
-    parser.add_argument(
-        "-dev",
-        "--device",
-        help="select device",
-        type=str,
-        default="cuda:0",
     )
     parser.add_argument(
         "-l", "--lr", help="define learning rate", type=float, default=0.001
@@ -76,7 +68,7 @@ def parse_args():
         "--directory",
         help="select data directory",
         type=Path,
-        default="/home/celery/Dataset/eggplant_leaf_face",
+        default="/data/celery/Dataset/eggplant_leaf_face/",
     )
     parser.add_argument("-b", "--batch", help="define batch size", type=int, default=32)
     parser.add_argument(
@@ -107,9 +99,9 @@ def train_model(
     num_epochs = model_features.num_epochs
 
     model = setter.set_model(model_name, model_features)
-    device = torch.device(model_features.device)
-    # model.to(device)
-    model = nn.DataParallel(model, device_ids=[0, 1, 2, 3])
+    device = torch.device("cuda:0")
+    model.to(device)
+    model = nn.DataParallel(model)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = setter.set_optimizer(model, model_features)
@@ -124,7 +116,6 @@ def train_model(
     print(f"lr: {lr}")
     print(f"scheduler: {scheduler_name}")
     print(f"num_class: {num_class}")
-    print(f"device: {device}")
     print("-------------------\n")
 
     train_loss = []
@@ -145,8 +136,8 @@ def train_model(
             running_corrects = 0
 
             for inputs, labels in tqdm(dataloaders[phase]):
-                # inputs = inputs.to(device)
-                # labels = labels.to(device)
+                inputs = inputs.to(device)
+                labels = labels.to(device)
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == "train"):
@@ -183,7 +174,7 @@ def train_model(
                     f"./models/{model_name}_{optimizer_name}_{lr}_{scheduler_name}.pth"
                 )
 
-                torch.save(model.state_dict(), model_path)
+                torch.save(model.module.state_dict(), model_path)
             if phase == "test" and epoch_loss < best_loss:
                 best_loss = epoch_loss
 
@@ -216,7 +207,6 @@ def train_model(
 
 def model_evaluation(dataloaders, model_features, model_path):
     model_name = model_features.model
-    # device_name = model_features.device
     lr = model_features.lr
     optimizer_name = model_features.optimizer
     scheduler_name = model_features.scheduler
@@ -224,17 +214,17 @@ def model_evaluation(dataloaders, model_features, model_path):
 
     model = setter.set_model(model_name, model_features)
     model.load_state_dict(torch.load(model_path))
-    # device = torch.device(device_name)
-    # model.to(device)
-    model = nn.DataParallel(model, device_ids=[0, 1, 2, 3])
+    device = torch.device("cuda:0")
+    model.to(device)
+    model = nn.DataParallel(model)
 
     y_true = []
     y_pred = []
 
     with torch.inference_mode():
         for inputs, labels in tqdm(dataloaders["test"]):
-            # inputs = inputs.to(device)
-            # labels = labels.to(device)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
             outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             for (label, pred) in zip(labels, preds):
@@ -315,7 +305,6 @@ def main():
         dataset_sizes={x: len(image_datasets[x]) for x in ["train", "test"]},
         classes=image_datasets["train"].classes,
         model=args.model,
-        device=args.device,
         lr=args.lr,
         optimizer=args.optimizer,
         scheduler=args.scheduler,
